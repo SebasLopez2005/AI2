@@ -4,30 +4,37 @@ from typing import List, Tuple, Optional, Dict
 
 import numpy as np
 
-# Word embeddings (gensim)
+# Word vectors (gensim)
 import gensim.downloader as api
 
 # SBERT (PyTorch)
 from sentence_transformers import SentenceTransformer
 
 
-# -----------------------------
+# ============================================================
 # Config
-# -----------------------------
+# ============================================================
 @dataclass
 class Config:
+    # Candidate generation
     top_k_candidates: int = 50
+
+    # Conservative replacement threshold
     sbert_similarity_threshold: float = 0.86
-    use_pos_filter: bool = True
+
+    # Target selection strategy
     target_strategy: str = "last_content_word"  # "last_word" also supported
 
 
-# -----------------------------
-# Sentence + token handling
-# -----------------------------
+# ============================================================
+# Tokenization + sentence splitting
+# ============================================================
 _WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 
 def split_sentences(text: str) -> List[str]:
+    """
+    Lightweight sentence segmentation for short texts.
+    """
     text = text.strip()
     if not text:
         return []
@@ -74,55 +81,182 @@ def replace_word_once(sentence: str, original: str, replacement: str) -> str:
     return sentence[:m.start()] + replacement + sentence[m.end():]
 
 
-# -----------------------------
-# POS tagging (NLTK) - optional
-# -----------------------------
-def _nltk_ready() -> bool:
-    try:
-        import nltk  # noqa: F401
-        from nltk import pos_tag  # noqa: F401
-        return True
-    except Exception:
+# ============================================================
+# Heuristic guards (NO NLTK)
+# ============================================================
+DETERMINERS = {
+    "a","an","the","this","that","these","those",
+    "my","your","his","her","their","our"
+}
+
+# Adjective-ish suffixes (heuristic)
+ADJ_SUFFIXES = (
+    "en",   # wooden, golden
+    "ed",   # feathered (often adjectival)
+    "ous",  # famous
+    "ful",  # helpful
+    "ive",  # active
+    "al",   # natural
+    "ic",   # poetic
+    "ish",  # childish
+    "ary",  # primary
+    "less", # fearless
+    "y",    # feathery (context-sensitive)
+)
+
+def looks_plural(word: str) -> bool:
+    w = word.lower()
+    if w.endswith("ss"):
+        return False
+    return w.endswith("s")
+
+def match_casing_like(candidate: str, target: str) -> str:
+    """
+    Preserve capitalization style of the target.
+    """
+    if target[:1].isupper():
+        return candidate[:1].upper() + candidate[1:]
+    return candidate.lower()
+
+def find_last_token_index(tokens: List[str], target: str) -> Optional[int]:
+    """
+    Find last index of target in tokens; fallback to case-insensitive match.
+    """
+    for i in range(len(tokens) - 1, -1, -1):
+        if tokens[i] == target:
+            return i
+    t = target.lower()
+    for i in range(len(tokens) - 1, -1, -1):
+        if tokens[i].lower() == t:
+            return i
+    return None
+
+def nounish_context(tokens: List[str], target_index: int) -> bool:
+    """
+    Heuristic: treat target as likely NOUN if it appears in a noun phrase:
+      - preceded by a determiner: "the wood"
+      - preceded by determiner + modifier: "a yellow wood"
+      - preceded by common preposition + determiner: "in a wood"
+    This helps prevent noun->adj flips like wood -> wooden.
+    """
+    if target_index is None or target_index <= 0:
         return False
 
-def get_pos_tag(word: str) -> Optional[str]:
-    """
-    Returns coarse POS for a single word using NLTK if available, else None.
-    """
-    try:
-        from nltk import pos_tag
-        tag = pos_tag([word])[0][1]  # e.g., NN, VB, JJ...
-        if tag.startswith("NN"):
-            return "NOUN"
-        if tag.startswith("VB"):
-            return "VERB"
-        if tag.startswith("JJ"):
-            return "ADJ"
-        if tag.startswith("RB"):
-            return "ADV"
-        return "OTHER"
-    except Exception:
-        return None
+    prev = tokens[target_index - 1].lower()
+
+    # Immediate determiner: "the wood"
+    if prev in DETERMINERS:
+        return True
+
+    # Determiner two words back: "a yellow wood"
+    if target_index >= 2:
+        prev2 = tokens[target_index - 2].lower()
+        if prev2 in DETERMINERS:
+            return True
+
+    # Preposition + determiner two/three words back: "in a wood", "in the dark forest"
+    PREPS = {"in","on","at","by","to","from","into","over","under","within","through"}
+    if target_index >= 2:
+        prev2 = tokens[target_index - 2].lower()
+        if prev2 in PREPS and prev in DETERMINERS:
+            return True
+    if target_index >= 3:
+        prev3 = tokens[target_index - 3].lower()
+        prev2 = tokens[target_index - 2].lower()
+        if prev3 in PREPS and prev2 in DETERMINERS:
+            return True
+
+    return False
 
 
-# -----------------------------
+def is_junk_candidate(c: str, target: str) -> bool:
+    if not c:
+        return True
+    if any(ch.isdigit() for ch in c):
+        return True
+    if "_" in c:
+        return True
+    if len(c) <= 2:
+        return True
+    if c.lower() == target.lower():
+        return True
+    if is_stopword_basic(c):
+        return True
+    return False
+
+def filter_candidates_no_nltk(sentence: str, target: str, candidates: List[str]) -> List[str]:
+    """
+    Filtering using only heuristics (no NLTK):
+    - remove junk tokens
+    - enforce plural agreement
+    - detect noun-phrase contexts (e.g., 'a yellow wood')
+    - block noun -> adjective flips like wood -> wooden
+    """
+    tokens = tokenize_words(sentence)
+    idx = find_last_token_index(tokens, target)
+    is_nounish = nounish_context(tokens, idx) if idx is not None else False
+    target_is_plural = looks_plural(target)
+
+    filtered: List[str] = []
+    for c in candidates:
+        if is_junk_candidate(c, target):
+            continue
+
+        # Enforce plural agreement (feathers -> feather blocked)
+        if target_is_plural and not looks_plural(c):
+            continue
+
+        if is_nounish:
+            cl = c.lower()
+
+            # 🔴 HARD BLOCK: noun → adjective (wood → wooden)
+            if cl == target.lower() + "en":
+                continue
+
+            # Block common noun → adjective shifts via suffix
+            if cl.endswith("en") and not target.lower().endswith("en"):
+                continue
+
+            # Conservative block for adjective-ish endings in noun contexts
+            if cl.endswith(ADJ_SUFFIXES) and not looks_plural(c):
+                continue
+
+        filtered.append(c)
+
+    # Deduplicate (case-insensitive) while preserving order
+    seen = set()
+    out = []
+    for c in filtered:
+        key = c.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+
+    return out
+
+
+
+# ============================================================
 # Models
-# -----------------------------
+# ============================================================
 def load_word_vectors(model_name: str = "glove-wiki-gigaword-100"):
     """
     Loads pretrained vectors via gensim downloader (cached after first download).
-    If you already have GoogleNews Word2Vec working, you can use:
+    If your network allows it and you have disk space, you can use:
       model_name="word2vec-google-news-300"
     """
     return api.load(model_name)
 
 def load_sbert_model(model_name: str = "all-MiniLM-L6-v2") -> SentenceTransformer:
+    """
+    Sentence-Transformers uses PyTorch.
+    """
     return SentenceTransformer(model_name)
 
 
-# -----------------------------
-# Candidate generation + filtering
-# -----------------------------
+# ============================================================
+# Candidate generation + SBERT scoring
+# ============================================================
 def generate_candidates(wv, target: str, top_k: int) -> List[str]:
     key = target
     if key not in wv:
@@ -132,54 +266,6 @@ def generate_candidates(wv, target: str, top_k: int) -> List[str]:
     neighbors = wv.most_similar(key, topn=top_k)
     return [w for (w, _) in neighbors]
 
-def filter_candidates(
-    candidates: List[str],
-    target: str,
-    use_pos_filter: bool = True
-) -> List[str]:
-    # If NLTK isn't available, silently skip POS filtering
-    pos_ok = use_pos_filter and _nltk_ready()
-    target_pos = get_pos_tag(target) if pos_ok else None
-
-    filtered = []
-    for c in candidates:
-        if not c:
-            continue
-        # Common junk from embeddings
-        if any(ch.isdigit() for ch in c):
-            continue
-        if "_" in c:
-            continue
-        if len(c) <= 2:
-            continue
-        if c.lower() == target.lower():
-            continue
-        if is_stopword_basic(c):
-            continue
-
-        # Coarse POS match (only if NLTK is actually working)
-        if pos_ok and target_pos is not None:
-            c_pos = get_pos_tag(c)
-            if c_pos is not None and target_pos in {"NOUN","VERB","ADJ","ADV"}:
-                if c_pos != target_pos:
-                    continue
-
-        filtered.append(c)
-
-    # Deduplicate (case-insensitive), preserve order
-    seen = set()
-    out = []
-    for c in filtered:
-        cl = c.lower()
-        if cl not in seen:
-            seen.add(cl)
-            out.append(c)
-    return out
-
-
-# -----------------------------
-# SBERT scoring (PATCHED)
-# -----------------------------
 def pick_best_replacement_sbert(
     sbert: SentenceTransformer,
     sentence: str,
@@ -188,46 +274,40 @@ def pick_best_replacement_sbert(
     threshold: float
 ) -> Tuple[str, Optional[float], Dict[str, float]]:
     """
-    PATCH:
-    - Previously, baseline was 1.0 and we only replaced if score > 1.0 (impossible).
-    - Now we:
-        1) compute sim(S, S_c) for each candidate
-        2) pick candidate with max similarity
-        3) replace if max_sim >= threshold
-    Returns (chosen_word, chosen_score_or_None_if_no_change, score_map).
+    Score each candidate by similarity between original sentence and modified sentence.
+    Replace only if best_sim >= threshold.
     """
     if not candidates:
         return target, None, {}
 
-    # Normalize embeddings so dot product == cosine similarity
     original_emb = sbert.encode(sentence, normalize_embeddings=True)
 
-    score_map: Dict[str, float] = {}
     best_word = target
-    best_score = -1.0  # allow any candidate to win
+    best_score = -1.0
+    score_map: Dict[str, float] = {}
 
     for c in candidates:
         modified = replace_word_once(sentence, target, c)
         if modified == sentence:
             continue
+
         mod_emb = sbert.encode(modified, normalize_embeddings=True)
-        score = float(np.dot(original_emb, mod_emb))
+        score = float(np.dot(original_emb, mod_emb))  # cosine since normalized
         score_map[c] = score
 
         if score > best_score:
             best_score = score
             best_word = c
 
-    # Conservative policy: only replace if threshold is met
     if best_word != target and best_score >= threshold:
         return best_word, best_score, score_map
 
     return target, None, score_map
 
 
-# -----------------------------
+# ============================================================
 # End-to-end pipeline
-# -----------------------------
+# ============================================================
 def rewrite_text(text: str, wv, sbert: SentenceTransformer, cfg: Config):
     sentences = split_sentences(text)
     outputs = []
@@ -240,7 +320,7 @@ def rewrite_text(text: str, wv, sbert: SentenceTransformer, cfg: Config):
             continue
 
         candidates = generate_candidates(wv, target, cfg.top_k_candidates)
-        candidates = filter_candidates(candidates, target, use_pos_filter=cfg.use_pos_filter)
+        candidates = filter_candidates_no_nltk(s, target, candidates)
 
         chosen, chosen_score, score_map = pick_best_replacement_sbert(
             sbert=sbert,
@@ -250,6 +330,7 @@ def rewrite_text(text: str, wv, sbert: SentenceTransformer, cfg: Config):
             threshold=cfg.sbert_similarity_threshold,
         )
 
+        chosen = match_casing_like(chosen, target)
         modified = replace_word_once(s, target, chosen) if chosen != target else s
         outputs.append(modified)
 
@@ -260,33 +341,100 @@ def rewrite_text(text: str, wv, sbert: SentenceTransformer, cfg: Config):
             "chosen": chosen,
             "chosen_score": chosen_score,
             "top5_candidates": top5,
-            "pos_filter_active": (cfg.use_pos_filter and _nltk_ready()),
         })
 
     return " ".join(outputs), debug_rows
 
 
-# -----------------------------
-# Example run
-# -----------------------------
+def run_multi_threshold_suite(wv, sbert, base_cfg: Config):
+    """
+    Runs the report suite across multiple thresholds to compare behavior.
+    Thresholds requested: 0.70, 0.80, 0.83, 0.86, 0.90
+    """
+    test_texts = [
+        {
+            "name": "Shakespeare (Metaphor & Polysemy)",
+            "text": "All the world’s a stage, And all the men and women merely players."
+        },
+        {
+            "name": "Robert Frost (Ambiguity)",
+            "text": "Two roads diverged in a yellow wood."
+        },
+        {
+            "name": "Emily Dickinson (Compressed Meaning)",
+            "text": "Hope is the thing with feathers."
+        },
+        {
+            "name": "William Blake (Archaic Language)",
+            "text": "Tyger Tyger, burning bright, In the forests of the night."
+        },
+        {
+            "name": "Haiku (Minimal Context)",
+            "text": "An old silent pond— A frog jumps into the pond, Splash! Silence again."
+        }
+    ]
+
+    thresholds = [0.70, 0.80, 0.83, 0.86, 0.90]
+
+    print("\n" + "=" * 78)
+    print(f"MULTI-THRESHOLD SUITE  |  topK={base_cfg.top_k_candidates}  |  strategy={base_cfg.target_strategy}")
+    print("=" * 78)
+
+    for thr in thresholds:
+        cfg = Config(
+            top_k_candidates=base_cfg.top_k_candidates,
+            sbert_similarity_threshold=thr,
+            target_strategy=base_cfg.target_strategy,
+        )
+
+        print("\n" + "#" * 78)
+        print(f"THRESHOLD = {thr:.2f}")
+        print("#" * 78)
+
+        for item in test_texts:
+            name = item["name"]
+            text = item["text"]
+
+            modified, debug_rows = rewrite_text(text, wv, sbert, cfg)
+
+            print("\n" + "-" * 78)
+            print(f"TEST: {name}")
+            print("-" * 78)
+            print("ORIGINAL:")
+            print(text)
+            print("\nMODIFIED:")
+            print(modified)
+
+            print("\nDEBUG (per sentence):")
+            for row in debug_rows:
+                sent = row["sentence"]
+                target = row["target"]
+                chosen = row["chosen"]
+                score = row["chosen_score"]
+                top5 = row["top5_candidates"]
+
+                print(f"\nSentence: {sent}")
+                print(f"  Target: {target}")
+                print(f"  Chosen: {chosen}")
+                print(f"  Score : {score}")
+                print(f"  Top-5 candidates (candidate, sim): {top5}")
+
+    print("\n" + "=" * 78)
+    print("END MULTI-THRESHOLD SUITE")
+    print("=" * 78)
+
+
 if __name__ == "__main__":
-    # If GoogleNews Word2Vec is working for you, swap to:
-    # wv = load_word_vectors("word2vec-google-news-300")
+    # Load once
     wv = load_word_vectors("glove-wiki-gigaword-100")
     sbert = load_sbert_model("all-MiniLM-L6-v2")
 
-    cfg = Config(
+    base_cfg = Config(
         top_k_candidates=50,
-        sbert_similarity_threshold=0.86,  # try 0.84 if you want "plumage" to have a chance
-        use_pos_filter=True,
+        sbert_similarity_threshold=0.86,   # placeholder; overwritten in suite
         target_strategy="last_content_word",
     )
 
-    text = "Hope is the thing with feathers. Two roads diverged in a yellow wood."
-    out, dbg = rewrite_text(text, wv, sbert, cfg)
+    run_multi_threshold_suite(wv, sbert, base_cfg)
 
-    print("\nORIGINAL:\n", text)
-    print("\nMODIFIED:\n", out)
-    print("\nDEBUG:")
-    for row in dbg:
-        print(row)
+

@@ -1,0 +1,48 @@
+# =========================
+# LaTeX build artifacts
+# =========================
+
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+*.nav
+*.snm
+*.vrb
+
+# =========================
+# LaTeX temporary / backup files
+# =========================
+
+*.tmp
+*.bak
+*.backup
+*.old
+*.swp
+*.swo
+*~
+
+# =========================
+# LaTeX editors / IDEs
+# =========================
+
+.vscode/
+.idea/
+*.code-workspace
+
+# =========================
+# OS junk
+# =========================
+
+.DS_Store
+Thumbs.db

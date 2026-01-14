@@ -1,0 +1,184 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+\setstretch{1.15}
+
+\title{\textbf{Context-Aware Synonym Replacement Using Learned Representations}}
+\author{Sebastian Lopez \\ Texas Tech University}
+\date{CS43910 -- Homework 1 \\ Spring 2026}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+The goal of this project is to design and analyze a context-aware synonym replacement system using learned representations. Rather than focusing on fluent text generation, the objective is to explore how pretrained embeddings encode meaning, how context can be approximated using similarity measures, and where such approaches fail—especially in metaphorical, poetic, or ambiguous language.
+
+To achieve this, we implemented a multi-stage pipeline that replaces selected words in a sentence with near-synonyms while attempting to preserve sentence-level meaning. The system explicitly avoids large language models, masked language models, and rule-based synonym dictionaries, relying instead on pretrained word embeddings and sentence embeddings.
+
+\section{System Overview}
+
+The system follows a modular, multi-stage pipeline:
+
+\begin{enumerate}
+    \item Sentence segmentation
+    \item Target word selection
+    \item Candidate synonym generation
+    \item Candidate filtering
+    \item Context-based scoring
+    \item Replacement decision
+\end{enumerate}
+
+Each stage is implemented as a separate component to allow controlled experimentation and clear analysis of failure modes.
+
+\section{Target Word Selection}
+
+We adopt a deterministic target selection strategy: the \textbf{last content word of each sentence}. Stopwords are excluded to avoid replacing function words.
+
+This strategy was chosen because:
+\begin{itemize}
+    \item It avoids cherry-picking easy cases
+    \item It aligns with examples provided in the assignment
+    \item It produces consistent, repeatable behavior across test texts
+\end{itemize}
+
+\section{Embedding Models and Rationale}
+
+\subsection{Word-Level Embeddings}
+
+For candidate generation, we use pretrained distributional word embeddings (GloVe / Word2Vec-style vectors) loaded via \texttt{gensim}. These embeddings provide a list of semantically related words based on co-occurrence statistics.
+
+\textbf{Rationale:}
+\begin{itemize}
+    \item Efficient nearest-neighbor retrieval
+    \item Captures semantic relatedness
+    \item Suitable for generating candidate synonyms
+\end{itemize}
+
+\subsection{Sentence-Level Embeddings}
+
+For context awareness, we use Sentence-BERT (SBERT) implemented in PyTorch via the \texttt{sentence-transformers} library.
+
+\textbf{Rationale:}
+\begin{itemize}
+    \item Produces sentence-level semantic representations
+    \item Enables direct comparison between original and modified sentences
+    \item Allows explicit reasoning about context preservation
+\end{itemize}
+
+SBERT embeddings are normalized, and cosine similarity is used as the primary scoring metric.
+
+\section{Candidate Generation and Filtering}
+
+Candidate words are generated as the top-$k$ nearest neighbors of the target word in the word embedding space. However, raw embedding neighbors often include unsuitable replacements. To address this, we introduce several lightweight heuristic filters (without POS taggers or external NLP libraries):
+
+\begin{itemize}
+    \item Removal of stopwords and non-alphabetic tokens
+    \item Plural agreement enforcement (e.g., \textit{feathers} $\not\rightarrow$ \textit{feather})
+    \item Noun-phrase context detection (e.g., ``a yellow wood'')
+    \item Blocking noun-to-adjective shifts (e.g., \textit{wood} $\not\rightarrow$ \textit{wooden})
+    \item Capitalization preservation
+\end{itemize}
+
+These heuristics do not replace embedding-based reasoning but act as grammatical guardrails that reduce trivial errors.
+
+\section{Context-Based Scoring}
+
+For each candidate synonym $c$, a modified sentence $S_c$ is created by replacing the target word in the original sentence $S$. Both sentences are embedded using SBERT, and similarity is computed as:
+
+\[
+\text{score}(c) = \cos(\text{SBERT}(S), \text{SBERT}(S_c))
+\]
+
+The candidate with the highest similarity score is selected. Replacement occurs only if this score exceeds a predefined threshold.
+
+\section{Replacement Policy}
+
+The system follows a conservative replacement policy:
+\begin{itemize}
+    \item Replace the target word only if the best candidate exceeds a similarity threshold
+    \item Otherwise, retain the original word
+\end{itemize}
+
+This design prioritizes semantic preservation over aggressive substitution.
+
+\section{Threshold Sensitivity Study}
+
+To analyze the impact of similarity thresholds, we evaluated the system using thresholds of 0.70, 0.80, 0.83, 0.86, and 0.90 on the provided test texts (Shakespeare, Frost, Dickinson, Blake, and a haiku).
+
+\subsection{Observed Trends}
+
+\begin{itemize}
+    \item \textbf{Low thresholds (0.70--0.80):} Many replacements occur, but metaphorical meaning frequently collapses.
+    \item \textbf{Mid threshold (0.83):} Metaphorical lines begin to be preserved while literal substitutions remain.
+    \item \textbf{Conservative threshold (0.86):} Best balance between safety and usefulness.
+    \item \textbf{High threshold (0.90):} Overly restrictive; even reasonable substitutions are blocked.
+\end{itemize}
+
+Based on these results, a threshold of \textbf{0.86} is selected as the final system configuration.
+
+\section{Examples}
+
+\subsection{Successful Replacement}
+
+\textbf{Original:} ``Two roads diverged in a yellow wood.'' \\
+\textbf{Modified:} ``Two roads diverged in a yellow \textit{timber}.''
+
+This replacement preserves sentence meaning and demonstrates effective alignment between word-level similarity and sentence-level context.
+
+\subsection{Conservative Behavior}
+
+\textbf{Original:} ``Hope is the thing with feathers.'' \\
+\textbf{Modified:} (unchanged at threshold 0.86)
+
+The system correctly refrains from replacing the metaphorical term due to insufficient contextual similarity.
+
+\section{Failure Analysis}
+
+Several systematic failure modes were observed:
+
+\subsection{Polysemy}
+
+\textit{players} $\rightarrow$ \textit{teams}
+
+In Shakespeare's metaphor, ``players'' refers to theatrical roles. Word embeddings favor the sports-related sense, resulting in an incorrect substitution despite high sentence similarity.
+
+\subsection{Metaphor Collapse}
+
+\textit{feathers} $\rightarrow$ \textit{birds} (at low thresholds)
+
+While semantically related, this replacement destroys the metaphorical meaning, illustrating that embedding similarity does not capture figurative intent.
+
+\subsection{Grammatical Drift}
+
+\textit{night} $\rightarrow$ \textit{nights}
+
+Sentence embeddings tolerate minor inflection changes even when grammatical correctness is degraded.
+
+\subsection{Style and Rhythm Loss}
+
+\textit{Splash!} $\rightarrow$ \textit{Splashes!}
+
+Meaning remains similar, but poetic impact and rhythm are weakened—features not captured by embeddings.
+
+\subsection{Minimal Context Instability}
+
+Short sentences (e.g., ``Silence again.'') produce unstable substitutions due to limited contextual information.
+
+\section{Discussion}
+
+This project demonstrates that learned embeddings are powerful but insufficient on their own. Even with sentence-level context scoring, embedding-based similarity cannot reliably distinguish between acceptable substitutions and meaning-altering replacements in metaphorical, poetic, or ambiguous language.
+
+These findings motivate the use of richer models and additional linguistic constraints in modern NLP systems.
+
+\section{Conclusion}
+
+We presented a context-aware synonym replacement system based on pretrained word and sentence embeddings. Through systematic experimentation and threshold analysis, we showed where embeddings succeed and where they fail. The results highlight both the utility and the limitations of embedding-based semantic representations and reinforce why contemporary AI systems extend beyond similarity-based approaches alone.
+
+\end{document}
