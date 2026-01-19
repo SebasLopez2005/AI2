@@ -1,5 +1,6 @@
 "Homework 1 Special Topics in AI"
 "Sebastian Lopez & Diego Bonilla"
+# AI Disclaimer: This code was developed with the assistance of AI tools (Claude/ChatGPT) to facilitate learning and exploration of NLP concepts.
 
 import re
 from typing import List, Optional, Tuple

@@ -8,6 +8,8 @@
 \usepackage{hyperref}
 \usepackage{listings}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta, shapes}
 
 \setstretch{1.15}
 
@@ -19,8 +21,8 @@
 }
 
 \title{\textbf{Context-Aware Synonym Replacement Using Learned Representations}}
-\author{Sebastian Lopez & Diego Bonilla \\ Texas Tech University}
-\date{CS43910 -- Homework 1 \\ Spring 2026}
+\author{Sebastian Lopez \\ Texas Tech University}
+\date{CS4391 -- Homework 1 \\ Spring 2026}
 
 \begin{document}
 \maketitle
@@ -353,8 +355,116 @@ This homework demonstrates that learned embeddings are powerful but insufficient
 
 These findings motivate the use of more sophisticated models (such as masked language models or autoregressive transformers) and additional linguistic constraints in modern NLP systems.
 
+\section{Use of AI in This Homework}
+
+Given the exploratory nature of this assignment and the course's emphasis on understanding AI systems rather than rote implementation, we deliberately incorporated AI assistance (Claude/ChatGPT) as a learning tool throughout this homework. This section documents our approach and rationale.
+
+\subsection{Rationale for AI-Assisted Development}
+
+The assignment's open-ended structure encourages experimentation and deep understanding of embedding-based systems. Rather than using AI as a black-box solution generator, we employed it as an interactive collaborator:
+
+\begin{itemize}
+    \item \textbf{Scaffolding understanding:} AI helped clarify abstract concepts (e.g., how sentence embeddings differ from word embeddings)
+    \item \textbf{Accelerating iteration:} Rapid prototyping allowed us to test multiple filtering strategies
+    \item \textbf{Debugging support:} AI assisted in diagnosing why certain replacements failed
+    \item \textbf{Documentation:} AI generated the initial report template, which we heavily revised
+\end{itemize}
+
+This approach aligns with the course philosophy: understanding \textit{how} and \textit{why} AI systems work, not just implementing them mechanically.
+
+\subsection{AI-Assisted Workflow}
+
+Figure~\ref{fig:ai-workflow} illustrates our development process.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm,
+    box/.style={rectangle, draw, text width=3.5cm, align=center, minimum height=0.8cm, font=\small},
+    human/.style={box, fill=blue!10},
+    ai/.style={box, fill=green!10},
+    collab/.style={box, fill=yellow!10},
+    arrow/.style={->, thick}
+]
+
+% Code Development Column
+\node[human] (problem) at (0,0) {\textbf{Human:} Present problem requirements};
+\node[collab] (brainstorm) [below=of problem] {\textbf{Collaborative:} Brainstorm solutions};
+\node[human] (decide) [below=of brainstorm] {\textbf{Human:} Decide approach};
+\node[ai] (code) [below=of decide] {\textbf{AI:} Generate initial code};
+\node[human] (review) [below=of code] {\textbf{Human:} Review \& test};
+\node[collab] (debug) [below=of review] {\textbf{Collaborative:} Debug failures};
+\node[human] (refine) [below=of debug] {\textbf{Human:} Refine \& validate};
+
+% Report Development Column
+\node[ai] (template) at (7,0) {\textbf{AI:} Generate report template};
+\node[human] (structure) [below=of template] {\textbf{Human:} Restructure sections};
+\node[human] (results) [below=of structure] {\textbf{Human:} Add experimental results};
+\node[collab] (analysis) [below=of results] {\textbf{Collaborative:} Discuss failures};
+\node[human] (final) [below=of analysis] {\textbf{Human:} Finalize writing};
+
+% Arrows for code column
+\draw[arrow] (problem) -- (brainstorm);
+\draw[arrow] (brainstorm) -- (decide);
+\draw[arrow] (decide) -- (code);
+\draw[arrow] (code) -- (review);
+\draw[arrow] (review) -- (debug);
+\draw[arrow] (debug) -- (refine);
+
+% Arrows for report column
+\draw[arrow] (template) -- (structure);
+\draw[arrow] (structure) -- (results);
+\draw[arrow] (results) -- (analysis);
+\draw[arrow] (analysis) -- (final);
+
+% Labels
+\node[above=0.3cm of problem, font=\bf] {Code Development};
+\node[above=0.3cm of template, font=\bf] {Report Writing};
+
+% Connection between columns
+\draw[arrow, dashed, thick] (refine) -- ++(3,0) node[midway, above, font=\small] {Results feed into} -- (results);
+
+\end{tikzpicture}
+\caption{AI-assisted workflow for code development and report writing. Blue = human-led, green = AI-led, yellow = collaborative dialogue.}
+\label{fig:ai-workflow}
+\end{figure}
+
+\subsection{Specific AI Contributions}
+
+\subsubsection{Code Development}
+
+\begin{itemize}
+    \item \textbf{Problem presentation:} We described the assignment requirements and constraints
+    \item \textbf{Brainstorming:} Discussed tradeoffs between filtering strategies (e.g., POS tagging vs heuristics)
+    \item \textbf{Implementation:} AI generated initial function skeletons based on our architectural decisions
+    \item \textbf{Debugging:} When ``wood $\rightarrow$ wooden'' occurred, we collaboratively diagnosed the issue and designed the noun-adjective blocking filter
+\end{itemize}
+
+\subsubsection{Report Writing}
+
+\begin{itemize}
+    \item \textbf{Template generation:} AI created an initial LaTeX structure with standard sections
+    \item \textbf{Revision:} We restructured sections, added experimental results, and rewrote analysis in our own voice
+    \item \textbf{Failure analysis:} Collaborative discussion helped articulate \textit{why} embeddings fail on metaphor
+\end{itemize}
+
+\subsection{Learning Outcomes}
+
+Using AI as a tool rather than a solution provider deepened our understanding in several ways:
+
+\begin{enumerate}
+    \item \textbf{Conceptual clarity:} Explaining the problem to AI forced us to articulate requirements precisely
+    \item \textbf{Faster iteration:} Testing multiple filtering strategies would have been prohibitively time-consuming without AI assistance
+    \item \textbf{Critical evaluation:} Reviewing AI-generated code required understanding \textit{why} certain design choices were made
+    \item \textbf{Debugging skills:} Diagnosing failures collaboratively built intuition about embedding behavior
+\end{enumerate}
+
+This approach reflects a pragmatic philosophy: in a course about AI, using AI tools to \textit{learn about AI} is both natural and pedagogically valuable, provided we remain active, critical participants rather than passive consumers.
+
 \section{Conclusion}
 
 We presented a context-aware synonym replacement system based on pretrained word and sentence embeddings. Through iterative development and systematic threshold analysis, we showed where embeddings succeed (literal synonyms) and where they fail (metaphor, polysemy, style). The results highlight both the utility and the fundamental limitations of embedding-based semantic representations and reinforce why contemporary AI systems extend beyond similarity-based approaches alone.
+
+Our AI-assisted development process demonstrated that modern AI tools, when used thoughtfully, can accelerate learning and experimentation without diminishing understanding. The failures we encountered and analyzed provide valuable insights into the gap between distributional semantics and human language comprehension.
 
 \end{document}
