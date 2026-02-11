@@ -1,0 +1,38 @@
+=== Linear Probing ===
+Test accuracy: 0.9338
+                      precision    recall  f1-score   support
+
+          AnnualCrop       0.91      0.97      0.94       472
+              Forest       0.97      0.99      0.98       442
+HerbaceousVegetation       0.92      0.95      0.93       458
+             Highway       0.88      0.86      0.87       391
+          Industrial       0.97      0.93      0.95       378
+             Pasture       0.94      0.93      0.94       299
+       PermanentCrop       0.94      0.88      0.91       379
+         Residential       0.93      0.98      0.95       450
+               River       0.90      0.84      0.87       375
+             SeaLake       0.98      0.98      0.98       406
+
+            accuracy                           0.93      4050
+           macro avg       0.93      0.93      0.93      4050
+        weighted avg       0.93      0.93      0.93      4050
+
+
+=== Scratch ===
+Test accuracy: 0.9200
+                      precision    recall  f1-score   support
+
+          AnnualCrop       0.92      0.92      0.92       472
+              Forest       0.97      0.93      0.95       442
+HerbaceousVegetation       0.89      0.91      0.90       458
+             Highway       0.98      0.78      0.87       391
+          Industrial       0.95      0.95      0.95       378
+             Pasture       0.89      0.91      0.90       299
+       PermanentCrop       0.90      0.90      0.90       379
+         Residential       0.97      0.97      0.97       450
+               River       0.84      0.95      0.89       375
+             SeaLake       0.90      0.98      0.93       406
+
+            accuracy                           0.92      4050
+           macro avg       0.92      0.92      0.92      4050
+        weighted avg       0.92      0.92      0.92      4050
